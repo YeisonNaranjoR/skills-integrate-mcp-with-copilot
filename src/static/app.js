@@ -3,6 +3,30 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const signupContainer = document.getElementById("signup-container");
+  const loginToggle = document.getElementById("login-toggle");
+  const loginForm = document.getElementById("login-form");
+  const logoutButton = document.getElementById("logout-button");
+  const authMessage = document.getElementById("auth-message");
+  let isTeacher = false;
+
+  function setTeacherMode(authenticated) {
+    isTeacher = authenticated;
+    signupContainer.classList.toggle("hidden", !isTeacher);
+    loginToggle.classList.toggle("hidden", isTeacher);
+    logoutButton.classList.toggle("hidden", !isTeacher);
+    loginForm.classList.add("hidden");
+  }
+
+  async function refreshTeacherMode() {
+    try {
+      const response = await fetch("/auth/session");
+      const result = await response.json();
+      setTeacherMode(response.ok && result.authenticated);
+    } catch (error) {
+      setTeacherMode(false);
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.replaceChildren(new Option("-- Select an activity --", ""));
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -30,7 +55,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        isTeacher
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}" aria-label="Remove ${email} from ${name}">Remove</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -69,7 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Handle unregister functionality
   async function handleUnregister(event) {
-    const button = event.target;
+    const button = event.currentTarget;
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
@@ -109,6 +138,52 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error unregistering:", error);
     }
   }
+
+  loginToggle.addEventListener("click", () => {
+    loginForm.classList.toggle("hidden");
+    authMessage.textContent = "";
+    if (!loginForm.classList.contains("hidden")) {
+      document.getElementById("teacher-username").focus();
+    }
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    authMessage.textContent = "";
+
+    const formData = new FormData(loginForm);
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: formData.get("username"),
+          password: formData.get("password"),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        authMessage.textContent = result.detail || "Unable to sign in";
+        return;
+      }
+
+      loginForm.reset();
+      setTeacherMode(true);
+      await fetchActivities();
+    } catch (error) {
+      authMessage.textContent = "Failed to sign in. Please try again.";
+    }
+  });
+
+  logoutButton.addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST" });
+    } finally {
+      setTeacherMode(false);
+      await fetchActivities();
+    }
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -156,5 +231,5 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Initialize app
-  fetchActivities();
+  refreshTeacherMode().then(fetchActivities);
 });
